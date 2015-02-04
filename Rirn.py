@@ -1,39 +1,41 @@
-import praw
-from imgurpython import ImgurClient
 from time import sleep, time as now, localtime, strftime
 import sqlite3
 import json
 from os.path import isfile
 from os import unlink
 import sys
-import imgurpython
+from imgurpython import ImgurClient
 from imgurpython.imgur.models.gallery_album import GalleryAlbum
 from imgurpython.imgur.models.gallery_image import GalleryImage
+import praw
 
 DATABASE = "posts.db"
 LOCK_FILE=".lock"
 
 #
 # TODO:
-# - error handling
+# - error handling ...
+# - notification clean bug
+# - clean old handled_posts (after a week ?)
+# - better logging (logging module ?!)
+# - check remaining imgur calls (shouldn't be a problem except with really many user ?.)
 #
 
 
 # A little dirty hack to redirect all output to the stdout and also in a lockfile.
-# This is beter as ./ouScript > log_file because it gets flushed after every write,
-# instead once at the script end.
+# This is better as ./ourScript > log_file because it gets flushed after every write,
+# instead once at the script end (on win).
 class Simple_logging(object):
     def __init__(self, log_file):
         self.ori_fd = sys.stdout
         self.log_fd = open(log_file, "ab")
-    
     def write(self, data):
         ret = self.ori_fd.write(data)
         self.log_fd.write(data)
         self.log_fd.flush()
         return ret
 log = Simple_logging("log.txt")
-# From now on everything written to stdout and stderr goes over our wrapper and gets logged, too
+# From now on everything written to stdout and stderr goes over our wrapper and gets logged in "log.txt", too
 sys.stdout = log
 sys.stderr = log        
         
@@ -53,7 +55,7 @@ def init_db():
     return con
 
 
-# Init the imgur api from our condig.
+# Init the imgur api from our config.
 # If we don't already have an refresh key let the user create one.
 def init_imgur_api(config_file):
     if isfile(config_file):
@@ -64,13 +66,13 @@ def init_imgur_api(config_file):
     if "client_secret" not in config: config['client_secret'] = raw_input("Please insert the client secret: ")
     if "refresh_token" not in config:
         imgurAPI = ImgurClient(config['client_id'], config['client_secret']) 
-        pin = raw_input("Please visit %s and paste it here: " % imgurAPI.get_auth_url('pin'))
+        pin = raw_input("Please visit %s and paste the pin here: " % imgurAPI.get_auth_url('pin'))
         credentials = imgurAPI.authorize(pin, 'pin')
         imgurAPI.set_user_auth(credentials['access_token'], credentials['refresh_token'])
         config['refresh_token'] = credentials['refresh_token']
     else:
         imgurAPI = ImgurClient(config['client_id'], config['client_secret'], refresh_token=config['refresh_token'])
-    # we always recreate the config as i am lazy
+    # we always recreate the config as i am lazy and it would be bad to loose the refresh key
     with open(config_file, "wb") as fd:
         json.dump(config, fd)
     return imgurAPI
@@ -156,8 +158,8 @@ if __name__ == '__main__':
             else: url = "http://imgur.com/gallery/" + gid
             print "-#-", "Report repost from", d.account_url, "at", rPost.short_link  
             imgurAPI.create_message(d.account_url,
-                                    "Your submission %s reached reddits frontpage (%s).\nIf you want the precious imgur karma remove your submission from the gallery now.\Have a great day," % (
-                                        url, rPost.short_link
+                                    "Your submission %s reached reddits frontpage (%s) with %i points.\nIf you want the precious imgur karma remove your submission from the gallery now.\nHave a great day," % (
+                                        url, rPost.short_link, rPost.ups - rPost.downs
                                     ))
         cur.execute(dbst_insert_handled, (gid, now()))
         # To give imgur some time (and don't get blocked) we wait 10 seconds.
